@@ -15,12 +15,15 @@ type SortField = 'clientName' | 'dueDate' | 'amount' | 'paymentMethod'
 type SortDir = 'asc' | 'desc'
 type Tab = 'invoices' | 'clients' | 'crm'
 
+const emptyForm = { name: '', service: '', amount: '', currency: 'BRL', paymentMethod: 'pix', billingCycle: 'monthly', nextDueDate: '' }
+
 export default function Dashboard() {
   const [clients, setClients] = useState<Client[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [tab, setTab] = useState<Tab>('invoices')
   const [showForm, setShowForm] = useState(false)
+  const [editingClient, setEditingClient] = useState<Client | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [usdRate, setUsdRate] = useState<number>(5.70)
@@ -30,11 +33,7 @@ export default function Dashboard() {
   const [filterPayment, setFilterPayment] = useState<'all' | 'pix' | 'stripe'>('all')
   const [expandedClient, setExpandedClient] = useState<string | null>(null)
   const [newTaskMap, setNewTaskMap] = useState<Record<string, { title: string; dueDate: string; recurrence: string }>>({})
-
-  const [form, setForm] = useState({
-    name: '', service: '', amount: '', currency: 'BRL',
-    paymentMethod: 'pix', billingCycle: 'monthly', nextDueDate: '',
-  })
+  const [form, setForm] = useState({ ...emptyForm })
 
   const load = useCallback(async () => {
     const [c, i, t, fx] = await Promise.all([
@@ -58,21 +57,50 @@ export default function Dashboard() {
     return amount * usdRate
   }
 
-  const fmt = (amount: number, currency: 'BRL' | 'USD') => {
-    const converted = convertAmt(amount, currency)
+  const fmt = (amount: number, currency?: 'BRL' | 'USD') => {
+    const converted = convertAmt(amount, currency ?? 'BRL')
     return displayCurrency === 'BRL' ? fmtBRL(converted) : fmtUSD(converted)
   }
 
-  const addClient = async () => {
+  const fmtDisplay = (v: number) => displayCurrency === 'BRL' ? fmtBRL(v) : fmtUSD(v)
+
+  const startEdit = (client: Client) => {
+    setEditingClient(client)
+    setForm({
+      name: client.name,
+      service: client.service ?? '',
+      amount: client.amount.toString(),
+      currency: client.currency ?? 'BRL',
+      paymentMethod: client.paymentMethod,
+      billingCycle: client.billingCycle,
+      nextDueDate: client.nextDueDate,
+    })
+    setShowForm(true)
+  }
+
+  const cancelForm = () => {
+    setShowForm(false)
+    setEditingClient(null)
+    setForm({ ...emptyForm })
+  }
+
+  const saveClient = async () => {
     if (!form.name || !form.amount || !form.nextDueDate) return
     setSaving(true)
-    await fetch('/api/clients', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    })
-    setForm({ name: '', service: '', amount: '', currency: 'BRL', paymentMethod: 'pix', billingCycle: 'monthly', nextDueDate: '' })
-    setShowForm(false)
+    if (editingClient) {
+      await fetch(`/api/clients/${editingClient.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+    } else {
+      await fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+    }
+    cancelForm()
     setSaving(false)
     load()
   }
@@ -140,7 +168,6 @@ export default function Dashboard() {
 
   const sortIcon = (field: SortField) => sortField === field ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ↕'
 
-  // Weekly checks: get 4 most recent mondays for weekly clients
   const getWeekDates = (dueDate: string) => {
     const due = new Date(dueDate + 'T12:00:00')
     const dates = []
@@ -152,7 +179,6 @@ export default function Dashboard() {
     return dates
   }
 
-  // Stats
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const thisMonth = today.getMonth(), thisYear = today.getFullYear()
   const monthInvoices = invoices.filter(i => {
@@ -170,11 +196,62 @@ export default function Dashboard() {
     </div>
   )
 
-  const fmtDisplay = (v: number) => displayCurrency === 'BRL' ? fmtBRL(v) : fmtUSD(v)
+  const clientForm = (
+    <div style={{ background: '#141414', border: '1px solid #2e2e2e', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+      <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 20, color: '#ccc' }}>
+        {editingClient ? `Editando: ${editingClient.name}` : 'Novo cliente'}
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div>
+          <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>NOME *</label>
+          <input placeholder="Ex: Petronia's Cleaning" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>SERVIÇO</label>
+          <input placeholder="Ex: Google Ads + Meta Ads" value={form.service} onChange={e => setForm(f => ({ ...f, service: e.target.value }))} />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>VALOR *</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input type="number" placeholder="1500" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} style={{ flex: 1 }} />
+            <select value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} style={{ width: 80 }}>
+              <option value="BRL">R$</option>
+              <option value="USD">US$</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>PRÓXIMO VENCIMENTO *</label>
+          <input type="date" value={form.nextDueDate} onChange={e => setForm(f => ({ ...f, nextDueDate: e.target.value }))} />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>FORMA DE PAGAMENTO</label>
+          <select value={form.paymentMethod} onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value }))}>
+            <option value="pix">PIX</option>
+            <option value="stripe">Stripe (automático)</option>
+          </select>
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>CICLO DE COBRANÇA</label>
+          <select value={form.billingCycle} onChange={e => setForm(f => ({ ...f, billingCycle: e.target.value }))}>
+            <option value="monthly">Mensal</option>
+            <option value="weekly">Semanal</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+        <button onClick={saveClient} disabled={saving} style={{ background: '#fff', color: '#000', padding: '10px 24px', fontWeight: 600, opacity: saving ? 0.5 : 1 }}>
+          {saving ? 'Salvando...' : editingClient ? 'Salvar alterações' : 'Adicionar cliente'}
+        </button>
+        <button onClick={cancelForm} style={{ background: 'transparent', color: '#666', padding: '10px 16px', border: '1px solid #2e2e2e', borderRadius: 8 }}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
-      {/* Sidebar */}
       <aside style={{ width: 220, background: '#0a0a0a', borderRight: '1px solid #1e1e1e', padding: '24px 0', display: 'flex', flexDirection: 'column', position: 'fixed', height: '100vh' }}>
         <div style={{ padding: '0 20px 24px', borderBottom: '1px solid #1e1e1e' }}>
           <p style={{ fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: '-0.3px' }}>Triv Digital</p>
@@ -196,7 +273,6 @@ export default function Dashboard() {
             </button>
           ))}
         </nav>
-        {/* Currency toggle */}
         <div style={{ padding: '16px 20px', borderTop: '1px solid #1e1e1e' }}>
           <p style={{ fontSize: 11, color: '#555', marginBottom: 8 }}>Exibir em</p>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -209,16 +285,12 @@ export default function Dashboard() {
               }}>{c}</button>
             ))}
           </div>
-          <p style={{ fontSize: 10, color: '#3e3e3e', marginTop: 8 }}>
-            USD/BRL: {usdRate.toFixed(2)}
-          </p>
+          <p style={{ fontSize: 10, color: '#3e3e3e', marginTop: 8 }}>USD/BRL: {usdRate.toFixed(2)}</p>
           <p style={{ fontSize: 10, color: '#3e3e3e', marginTop: 4 }}>Cron: 8h BRT · D0,2,3,7</p>
         </div>
       </aside>
 
-      {/* Main */}
       <main style={{ marginLeft: 220, flex: 1, padding: '32px 36px', maxWidth: 1000 }}>
-        {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
           {[
             { label: 'A receber (mês)', value: fmtDisplay(totalReceivable), color: '#f59e0b' },
@@ -233,7 +305,6 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* FATURAS */}
         {tab === 'invoices' && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -279,12 +350,7 @@ export default function Dashboard() {
                               <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                                 {weekDates.map(d => (
                                   <label key={d} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, cursor: 'pointer' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={!!(inv.weeklyChecks?.[d])}
-                                      onChange={e => toggleWeeklyCheck(inv.id, d, e.target.checked)}
-                                      style={{ width: 14, height: 14, accentColor: '#22c55e' }}
-                                    />
+                                    <input type="checkbox" checked={!!(inv.weeklyChecks?.[d])} onChange={e => toggleWeeklyCheck(inv.id, d, e.target.checked)} style={{ width: 14, height: 14, accentColor: '#22c55e' }} />
                                     <span style={{ fontSize: 9, color: '#555' }}>{d.slice(5).replace('-', '/')}</span>
                                   </label>
                                 ))}
@@ -293,11 +359,7 @@ export default function Dashboard() {
                           </td>
                           <td style={{ padding: '14px 16px', fontWeight: 600 }}>{fmt(inv.amount, inv.currency ?? 'BRL')}</td>
                           <td style={{ padding: '14px 16px' }}>
-                            <span style={{
-                              background: inv.paymentMethod === 'pix' ? '#0a1628' : '#052e16',
-                              color: inv.paymentMethod === 'pix' ? '#3b82f6' : '#22c55e',
-                              padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500
-                            }}>
+                            <span style={{ background: inv.paymentMethod === 'pix' ? '#0a1628' : '#052e16', color: inv.paymentMethod === 'pix' ? '#3b82f6' : '#22c55e', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500 }}>
                               {inv.paymentMethod === 'pix' ? 'PIX' : 'Stripe'}
                             </span>
                           </td>
@@ -323,61 +385,15 @@ export default function Dashboard() {
           </>
         )}
 
-        {/* CLIENTES */}
         {tab === 'clients' && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h2 style={{ fontSize: 18, fontWeight: 600 }}>Clientes</h2>
-              <button onClick={() => setShowForm(!showForm)} style={{ background: '#fff', color: '#000', padding: '8px 18px', fontWeight: 600, fontSize: 13 }}>
-                {showForm ? '✕ Cancelar' : '+ Novo cliente'}
+              <button onClick={() => { setEditingClient(null); setForm({ ...emptyForm }); setShowForm(!showForm) }} style={{ background: '#fff', color: '#000', padding: '8px 18px', fontWeight: 600, fontSize: 13 }}>
+                {showForm && !editingClient ? '✕ Cancelar' : '+ Novo cliente'}
               </button>
             </div>
-            {showForm && (
-              <div style={{ background: '#141414', border: '1px solid #2e2e2e', borderRadius: 12, padding: 24, marginBottom: 24 }}>
-                <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 20, color: '#ccc' }}>Novo cliente</p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>NOME *</label>
-                    <input placeholder="Ex: Petronia's Cleaning" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>SERVIÇO</label>
-                    <input placeholder="Ex: Google Ads + Meta Ads" value={form.service} onChange={e => setForm(f => ({ ...f, service: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>VALOR *</label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <input type="number" placeholder="1500" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} style={{ flex: 1 }} />
-                      <select value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} style={{ width: 80 }}>
-                        <option value="BRL">R$</option>
-                        <option value="USD">US$</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>PRÓXIMO VENCIMENTO *</label>
-                    <input type="date" value={form.nextDueDate} onChange={e => setForm(f => ({ ...f, nextDueDate: e.target.value }))} />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>FORMA DE PAGAMENTO</label>
-                    <select value={form.paymentMethod} onChange={e => setForm(f => ({ ...f, paymentMethod: e.target.value }))}>
-                      <option value="pix">PIX</option>
-                      <option value="stripe">Stripe (automático)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: 11, color: '#555', display: 'block', marginBottom: 6 }}>CICLO DE COBRANÇA</label>
-                    <select value={form.billingCycle} onChange={e => setForm(f => ({ ...f, billingCycle: e.target.value }))}>
-                      <option value="monthly">Mensal</option>
-                      <option value="weekly">Semanal</option>
-                    </select>
-                  </div>
-                </div>
-                <button onClick={addClient} disabled={saving} style={{ marginTop: 20, background: '#fff', color: '#000', padding: '10px 24px', fontWeight: 600, opacity: saving ? 0.5 : 1 }}>
-                  {saving ? 'Salvando...' : 'Adicionar cliente'}
-                </button>
-              </div>
-            )}
+            {showForm && clientForm}
             <div style={{ background: '#141414', border: '1px solid #1e1e1e', borderRadius: 12, overflow: 'hidden' }}>
               {clients.length === 0 ? (
                 <p style={{ padding: 32, color: '#555', textAlign: 'center' }}>Nenhum cliente cadastrado.</p>
@@ -404,9 +420,14 @@ export default function Dashboard() {
                         </td>
                         <td style={{ padding: '14px 16px', color: '#888' }}>{fmtDate(c.nextDueDate)}</td>
                         <td style={{ padding: '14px 16px' }}>
-                          <button onClick={() => deleteClient(c.id)} style={{ background: 'transparent', color: '#ef4444', padding: '5px 10px', fontSize: 12, border: '1px solid #2d0a0a', borderRadius: 6 }}>
-                            Remover
-                          </button>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button onClick={() => { startEdit(c); setShowForm(true) }} style={{ background: 'transparent', color: '#3b82f6', padding: '5px 10px', fontSize: 12, border: '1px solid #0a1628', borderRadius: 6 }}>
+                              Editar
+                            </button>
+                            <button onClick={() => deleteClient(c.id)} style={{ background: 'transparent', color: '#ef4444', padding: '5px 10px', fontSize: 12, border: '1px solid #2d0a0a', borderRadius: 6 }}>
+                              Remover
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -417,7 +438,6 @@ export default function Dashboard() {
           </>
         )}
 
-        {/* CRM / TASKS */}
         {tab === 'crm' && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -434,7 +454,6 @@ export default function Dashboard() {
 
                 return (
                   <div key={client.id} style={{ background: '#141414', border: '1px solid #1e1e1e', borderRadius: 12, overflow: 'hidden' }}>
-                    {/* Client header */}
                     <div onClick={() => setExpandedClient(isOpen ? null : client.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', cursor: 'pointer' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style={{ width: 36, height: 36, borderRadius: 8, background: '#1e1e1e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#888' }}>
@@ -457,32 +476,17 @@ export default function Dashboard() {
 
                     {isOpen && (
                       <div style={{ borderTop: '1px solid #1e1e1e', padding: '16px 20px' }}>
-                        {/* Add task form */}
                         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                          <input
-                            placeholder="Nova task..."
-                            value={nt.title}
-                            onChange={e => setNewTaskMap(m => ({ ...m, [client.id]: { ...nt, title: e.target.value } }))}
-                            onKeyDown={e => e.key === 'Enter' && addTask(client.id)}
-                            style={{ flex: 1 }}
-                          />
-                          <input
-                            type="date"
-                            value={nt.dueDate}
-                            onChange={e => setNewTaskMap(m => ({ ...m, [client.id]: { ...nt, dueDate: e.target.value } }))}
-                            style={{ width: 140 }}
-                          />
+                          <input placeholder="Nova task..." value={nt.title} onChange={e => setNewTaskMap(m => ({ ...m, [client.id]: { ...nt, title: e.target.value } }))} onKeyDown={e => e.key === 'Enter' && addTask(client.id)} style={{ flex: 1 }} />
+                          <input type="date" value={nt.dueDate} onChange={e => setNewTaskMap(m => ({ ...m, [client.id]: { ...nt, dueDate: e.target.value } }))} style={{ width: 140 }} />
                           <select value={nt.recurrence} onChange={e => setNewTaskMap(m => ({ ...m, [client.id]: { ...nt, recurrence: e.target.value } }))} style={{ width: 120 }}>
                             <option value="none">Sem recorrência</option>
                             <option value="weekly">Semanal</option>
                             <option value="monthly">Mensal</option>
                           </select>
-                          <button onClick={() => addTask(client.id)} style={{ background: '#fff', color: '#000', padding: '8px 16px', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap' }}>
-                            + Adicionar
-                          </button>
+                          <button onClick={() => addTask(client.id)} style={{ background: '#fff', color: '#000', padding: '8px 16px', fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap' }}>+ Adicionar</button>
                         </div>
 
-                        {/* Pending tasks */}
                         {pending.length === 0 && done.length === 0 && (
                           <p style={{ color: '#555', fontSize: 13 }}>Nenhuma task. Adicione acima.</p>
                         )}
@@ -504,7 +508,6 @@ export default function Dashboard() {
                           </div>
                         ))}
 
-                        {/* Done tasks (collapsed) */}
                         {done.length > 0 && (
                           <div style={{ marginTop: 12 }}>
                             <p style={{ fontSize: 11, color: '#555', marginBottom: 8 }}>CONCLUÍDAS ({done.length})</p>
