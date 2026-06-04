@@ -15,8 +15,9 @@ export async function POST(req: NextRequest) {
   const newClient: Client = {
     id: uuid(),
     name: body.name,
-    service: body.service,
+    service: body.service ?? '',
     amount: Number(body.amount),
+    currency: (body.currency as 'BRL' | 'USD') ?? 'BRL',
     paymentMethod: body.paymentMethod,
     billingCycle: body.billingCycle,
     nextDueDate: body.nextDueDate,
@@ -26,17 +27,18 @@ export async function POST(req: NextRequest) {
   clients.push(newClient)
   await saveClients(clients)
 
-  // Create first invoice for this client
   const invoices = await getInvoices()
-  const { v4: uuidv4 } = await import('uuid')
   invoices.push({
-    id: uuidv4(),
+    id: uuid(),
     clientId: newClient.id,
     clientName: newClient.name,
     service: newClient.service,
     amount: newClient.amount,
+    currency: newClient.currency,
+    paymentMethod: newClient.paymentMethod,
     dueDate: newClient.nextDueDate,
     status: 'pending',
+    weeklyChecks: {},
     createdAt: new Date().toISOString(),
   })
   await saveInvoices(invoices)
