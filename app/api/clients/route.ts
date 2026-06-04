@@ -15,9 +15,9 @@ export async function POST(req: NextRequest) {
   const newClient: Client = {
     id: uuid(),
     name: body.name,
-    service: body.service,
+    service: body.service ?? '',
     amount: Number(body.amount),
-    currency: body.currency ?? 'BRL',
+    currency: (body.currency as 'BRL' | 'USD') ?? 'BRL',
     paymentMethod: body.paymentMethod,
     billingCycle: body.billingCycle,
     nextDueDate: body.nextDueDate,

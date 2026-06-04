@@ -8,7 +8,7 @@ export interface Client {
   name: string
   service: string
   amount: number
-  currency: 'BRL' | 'USD'
+  currency?: 'BRL' | 'USD'
   paymentMethod: PaymentMethod
   billingCycle: BillingCycle
   nextDueDate: string
@@ -21,12 +21,12 @@ export interface Invoice {
   clientName: string
   service: string
   amount: number
-  currency: 'BRL' | 'USD'
+  currency?: 'BRL' | 'USD'
   paymentMethod: PaymentMethod
   dueDate: string
   status: InvoiceStatus
   paidAt?: string
-  weeklyChecks?: Record<string, boolean> // key: YYYY-MM-DD, value: paid
+  weeklyChecks?: Record<string, boolean>
   createdAt: string
 }
 
